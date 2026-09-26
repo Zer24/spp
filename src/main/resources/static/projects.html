@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Проекты</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ccc; padding: 6px; font-size: 13px; }
+        th { background: #f0f0f0; }
+        .toolbar { margin-bottom: 10px; display: flex; gap: 6px; align-items: center; }
+        .modal { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-content { background: #fff; padding: 20px; width: 480px; max-height: 90vh; overflow-y: auto; }
+        input, select { width: 100%; padding: 6px; margin: 4px 0; box-sizing: border-box; }
+        .error { color: #b00; font-size: 13px; margin-top: 8px; white-space: pre-wrap; }
+        .prog-row { border-bottom: 1px solid #eee; padding: 4px 0; }
+        .prog-row label { display: flex; align-items: center; gap: 6px; }
+        .prog-row .dates { display: flex; gap: 6px; margin-left: 24px; }
+        .prog-row .dates input { flex: 1; }
+    </style>
+</head>
+<body>
+<h2>Проекты</h2>
+<div class="toolbar">
+    <span id="userInfo"></span>
+    <button onclick="location.href='/programmers.html'">Программисты</button>
+    <button id="usersBtn" onclick="location.href='/users.html'" style="display:none">Пользователи</button>
+    <button onclick="logout()">Выйти</button>
+    <button id="addBtn" onclick="openForm()" style="display:none">Добавить проект</button>
+</div>
+
+<table>
+    <thead>
+    <tr>
+        <th>Название</th>
+        <th>Заказчик</th>
+        <th>Дата начала</th>
+        <th>Дата окончания</th>
+        <th>Кол-во программистов</th>
+        <th>Стоимость</th>
+        <th>Действия</th>
+    </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+</table>
+
+<div class="modal" id="modal">
+    <div class="modal-content">
+        <h3 id="formTitle">Новый проект</h3>
+        <input type="hidden" id="projectId">
+        <label>Название</label>
+        <input id="name" placeholder="Название">
+        <label>Заказчик</label>
+        <input id="customer" placeholder="Заказчик">
+        <label>Дата начала</label>
+        <input id="startDate" type="date">
+        <label>Дата окончания</label>
+        <input id="endDate" type="date">
+
+        <div id="programmersBlock" style="margin-top:14px">
+            <h4>Программисты на проекте</h4>
+            <div id="programmersList"></div>
+        </div>
+
+        <div class="error" id="formError"></div>
+
+        <div style="margin-top:14px">
+            <button onclick="save()">Сохранить</button>
+            <button onclick="closeForm()">Отмена</button>
+        </div>
+    </div>
+</div>
+
+<script src="/js/api.js"></script>
+<script>
+    const user = API.getUser();
+    if (!user) { window.location.href = '/login.html'; }
+    document.getElementById('userInfo').textContent = `${user.username} (${user.role})`;
+
+    // ВАЖНО: используем роли из backend (Role enum)
+    const canEdit = user.role === 'MANAGER' || user.role === 'ADMINISTRATOR';
+    if (canEdit) document.getElementById('addBtn').style.display = 'inline-block';
+    if (user.role === 'ADMINISTRATOR') document.getElementById('usersBtn').style.display = 'inline-block';
+
+    let allProgrammers = [];
+
+    async function load() {
+        const [projects, programmers] = await Promise.all([
+            API.get('/api/projects'),
+            API.get('/api/programmers')
+        ]);
+        allProgrammers = programmers;
+
+        const tbody = document.getElementById('tbody');
+        tbody.innerHTML = '';
+        projects.forEach(p => {
+            const tr = document.createElement('tr');
+
+            const tdName = document.createElement('td');
+            tdName.textContent = p.name || '';
+            const tdCustomer = document.createElement('td');
+            tdCustomer.textContent = p.customer || '';
+            const tdStart = document.createElement('td');
+            tdStart.textContent = p.startDate || '';
+            const tdEnd = document.createElement('td');
+            tdEnd.textContent = p.endDate || '';
+            const tdCount = document.createElement('td');
+            tdCount.textContent = p.programmersCount ?? '';
+            const tdCost = document.createElement('td');
+            tdCost.textContent = p.cost ?? '';
+            const tdActions = document.createElement('td');
+
+            if (canEdit) {
+                const editBtn = document.createElement('button');
+                editBtn.textContent = '✏️';
+                editBtn.onclick = () => openForm(p);
+                const delBtn = document.createElement('button');
+                delBtn.textContent = '🗑️';
+                delBtn.onclick = () => del(p.projectId);
+                tdActions.append(editBtn, delBtn);
+            }
+
+            tr.append(tdName, tdCustomer, tdStart, tdEnd, tdCount, tdCost, tdActions);
+            tbody.appendChild(tr);
+        });
+    }
+
+    function clearForm() {
+        document.getElementById('projectId').value = '';
+        document.getElementById('name').value = '';
+        document.getElementById('customer').value = '';
+        document.getElementById('startDate').value = '';
+        document.getElementById('endDate').value = '';
+        document.getElementById('programmersList').innerHTML = '';
+        document.getElementById('formError').textContent = '';
+    }
+
+    async function openForm(p) {
+        clearForm();
+        const modal = document.getElementById('modal');
+        modal.classList.add('active');
+        document.getElementById('formTitle').textContent = p ? 'Редактировать проект' : 'Новый проект';
+
+        if (p) {
+            document.getElementById('projectId').value = p.projectId;
+            document.getElementById('name').value = p.name || '';
+            document.getElementById('customer').value = p.customer || '';
+            document.getElementById('startDate').value = p.startDate || '';
+            document.getElementById('endDate').value = p.endDate || '';
+        }
+
+        // Список программистов: свободные + уже на этом проекте
+        const list = document.getElementById('programmersList');
+        list.innerHTML = '';
+        allProgrammers.forEach(pr => {
+            const onThisProject = p && pr.projectId === p.projectId;
+            const free = !pr.projectId;
+            if (!onThisProject && !free) return;
+
+            const row = document.createElement('div');
+            row.className = 'prog-row';
+
+            const label = document.createElement('label');
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.dataset.id = pr.programmerId;
+            cb.checked = !!onThisProject;
+            label.appendChild(cb);
+            label.append(` ${pr.lastName} ${pr.firstName} (${pr.position})`);
+            row.appendChild(label);
+
+            const dates = document.createElement('div');
+            dates.className = 'dates';
+            const start = document.createElement('input');
+            start.type = 'date';
+            start.dataset.start = pr.programmerId;
+            start.value = pr.workStartDate || '';
+            const end = document.createElement('input');
+            end.type = 'date';
+            end.dataset.end = pr.programmerId;
+            end.value = pr.workEndDate || '';
+            dates.append(start, end);
+            row.appendChild(dates);
+
+            list.appendChild(row);
+        });
+    }
+
+    function closeForm() {
+        document.getElementById('modal').classList.remove('active');
+    }
+
+    function validateProjectDates(startDate, endDate) {
+        if (!startDate || !endDate) return 'Укажите даты начала и окончания проекта';
+        if (endDate <= startDate) return 'Дата окончания должна быть позже даты начала';
+        return null;
+    }
+
+    function validateAssignment(project, a, pr) {
+        if (!a.workStartDate || !a.workEndDate) {
+            return `Для программиста ${pr.lastName} укажите даты работы`;
+        }
+        if (a.workStartDate < project.startDate) {
+            return `Дата начала работы ${pr.lastName} не может быть раньше даты начала проекта`;
+        }
+        if (a.workEndDate <= a.workStartDate) {
+            return `Дата окончания работы ${pr.lastName} должна быть позже даты начала`;
+        }
+        if (a.workEndDate > project.endDate) {
+            return `Дата окончания работы ${pr.lastName} не может быть позже даты окончания проекта`;
+        }
+        return null;
+    }
+
+    async function save() {
+        const errorEl = document.getElementById('formError');
+        errorEl.textContent = '';
+
+        const id = document.getElementById('projectId').value;
+        const name = document.getElementById('name').value.trim();
+        const customer = document.getElementById('customer').value.trim();
+        const startDate = document.getElementById('startDate').value;
+        const endDate = document.getElementById('endDate').value;
+
+        if (!name) { errorEl.textContent = 'Укажите название проекта'; return; }
+        const dateErr = validateProjectDates(startDate, endDate);
+        if (dateErr) { errorEl.textContent = dateErr; return; }
+        if (!customer) { errorEl.textContent = 'Укажите заказчика'; return; }
+
+        const body = { name, customer, startDate, endDate };
+
+        try {
+            let project;
+            if (id) project = await API.put('/api/projects/' + id, body);
+            else    project = await API.post('/api/projects', body);
+
+            // Собираем назначения
+            const assignments = [];
+            const rows = document.querySelectorAll('#programmersList .prog-row');
+            for (const row of rows) {
+                const cb = row.querySelector('input[type=checkbox]');
+                if (!cb.checked) continue;
+                const pid = cb.dataset.id;
+                const pr = allProgrammers.find(x => x.programmerId === pid);
+                const a = {
+                    programmerId: pid,
+                    workStartDate: row.querySelector(`input[data-start="${pid}"]`).value,
+                    workEndDate:   row.querySelector(`input[data-end="${pid}"]`).value
+                };
+                const aErr = validateAssignment(
+                    { startDate: project.startDate, endDate: project.endDate },
+                    a, pr
+                );
+                if (aErr) { errorEl.textContent = aErr; return; }
+                assignments.push(a);
+            }
+
+            await API.post(`/api/projects/${project.projectId}/programmers`, assignments);
+
+            closeForm();
+            await load();
+        } catch (e) {
+            errorEl.textContent = e.message || 'Ошибка сохранения';
+        }
+    }
+
+    async function del(id) {
+        if (!confirm('Удалить проект?')) return;
+        try {
+            await API.del('/api/projects/' + id);
+            await load();
+        } catch (e) {
+            alert('Ошибка удаления: ' + (e.message || ''));
+        }
+    }
+
+    function logout() { API.clear(); window.location.href = '/login.html'; }
+
+    load();
+</script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Вход</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 400px; margin: 80px auto; }
+        input, button { width: 100%; padding: 8px; margin: 6px 0; box-sizing: border-box; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+<h2>Вход в систему</h2>
+<div id="error" class="error"></div>
+<input id="username" placeholder="Логин">
+<input id="password" type="password" placeholder="Пароль">
+<button onclick="login()">Войти</button>
+<button onclick="register()">Зарегистрироваться</button>
+
+<script src="/js/api.js"></script>
+<script>
+    async function login() {
+        try {
+            const data = await API.post('/api/auth/login', {
+                username: document.getElementById('username').value,
+                password: document.getElementById('password').value
+            });
+            API.setTokens(data.accessToken, data.refreshToken);
+            localStorage.setItem('user', JSON.stringify(data.user));
+            window.location.href = '/projects.html';
+        } catch (e) {
+            document.getElementById('error').textContent = 'Ошибка: ' + e.message;
+        }
+    }
+
+    async function register() {
+        try {
+            const data = await API.post('/api/auth/register', {
+                username: document.getElementById('username').value,
+                email: document.getElementById('username').value + '@example.com',
+                password: document.getElementById('password').value
+            });
+            API.setTokens(data.accessToken, data.refreshToken);
+            localStorage.setItem('user', JSON.stringify(data.user));
+            window.location.href = '/projects.html';
+        } catch (e) {
+            document.getElementById('error').textContent = 'Ошибка: ' + e.message;
+        }
+    }
+</script>
+</body>
+</html>

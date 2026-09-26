@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Программисты</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ccc; padding: 6px; font-size: 13px; }
+        th { background: #f0f0f0; }
+        .toolbar { margin-bottom: 10px; display: flex; gap: 6px; align-items: center; }
+        .modal { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-content { background: #fff; padding: 20px; width: 420px; max-height: 90vh; overflow-y: auto; }
+        input, select { width: 100%; padding: 6px; margin: 4px 0; box-sizing: border-box; }
+        .error { color: #b00; font-size: 13px; margin-top: 8px; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+<h2>Программисты</h2>
+<div class="toolbar">
+    <span id="userInfo"></span>
+    <button onclick="location.href='/projects.html'">Проекты</button>
+    <button id="usersBtn" onclick="location.href='/users.html'" style="display:none">Пользователи</button>
+    <button onclick="logout()">Выйти</button>
+    <button id="addBtn" onclick="openForm()" style="display:none">Добавить программиста</button>
+</div>
+
+<table>
+    <thead>
+    <tr>
+        <th>Проект</th><th>Фамилия</th><th>Имя</th><th>Отчество</th>
+        <th>Должность</th><th>Начало</th><th>Окончание</th>
+        <th>Ставка/час</th><th>Занятость</th><th>Зарплата</th><th>Действия</th>
+    </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+</table>
+
+<div class="modal" id="modal">
+    <div class="modal-content">
+        <h3 id="formTitle">Новый программист</h3>
+        <input type="hidden" id="programmerId">
+        <label>Фамилия</label>
+        <input id="lastName">
+        <label>Имя</label>
+        <input id="firstName">
+        <label>Отчество</label>
+        <input id="middleName">
+        <label>Должность</label>
+        <select id="position">
+            <option value="JUNIOR">JUNIOR</option>
+            <option value="MIDDLE">MIDDLE</option>
+            <option value="SENIOR">SENIOR</option>
+            <option value="LEAD">LEAD</option>
+        </select>
+        <label>Ставка за час</label>
+        <input id="hourlyRate" type="number" step="0.01" min="0">
+        <label>Занятость</label>
+        <select id="employmentType">
+            <option value="FULL_TIME">Полный день</option>
+            <option value="PART_TIME">Неполный день</option>
+        </select>
+
+        <div class="error" id="formError"></div>
+
+        <div style="margin-top:10px">
+            <button onclick="save()">Сохранить</button>
+            <button onclick="closeForm()">Отмена</button>
+        </div>
+    </div>
+</div>
+
+<script src="/js/api.js"></script>
+<script>
+    const user = API.getUser();
+    if (!user) window.location.href = '/login.html';
+    document.getElementById('userInfo').textContent = `${user.username} (${user.role})`;
+    const canEdit = user.role === 'MANAGER' || user.role === 'ADMINISTRATOR';
+    if (canEdit) document.getElementById('addBtn').style.display = 'inline-block';
+    if (user.role === 'ADMINISTRATOR') document.getElementById('usersBtn').style.display = 'inline-block';
+
+    async function load() {
+        const list = await API.get('/api/programmers');
+        const tbody = document.getElementById('tbody');
+        tbody.innerHTML = '';
+        list.forEach(p => {
+            const tr = document.createElement('tr');
+
+            const cells = [
+                p.projectName || '',
+                p.lastName || '',
+                p.firstName || '',
+                p.middleName || '',
+                p.position || '',
+                p.workStartDate || '',
+                p.workEndDate || '',
+                p.hourlyRate ?? '',
+                p.employmentType === 'FULL_TIME' ? 'Полный' : 'Неполный',
+                p.salary ?? ''
+            ];
+            cells.forEach(v => {
+                const td = document.createElement('td');
+                td.textContent = v;
+                tr.appendChild(td);
+            });
+
+            const tdActions = document.createElement('td');
+            if (canEdit) {
+                const editBtn = document.createElement('button');
+                editBtn.textContent = '✏️';
+                editBtn.onclick = () => openForm(p);
+                const delBtn = document.createElement('button');
+                delBtn.textContent = '🗑️';
+                delBtn.onclick = () => del(p.programmerId);
+                tdActions.append(editBtn, delBtn);
+            }
+            tr.appendChild(tdActions);
+
+            tbody.appendChild(tr);
+        });
+    }
+
+    function openForm(p) {
+        const modal = document.getElementById('modal');
+        modal.classList.add('active');
+        document.getElementById('formTitle').textContent = p ? 'Редактировать' : 'Новый программист';
+        document.getElementById('programmerId').value = p?.programmerId || '';
+        document.getElementById('lastName').value = p?.lastName || '';
+        document.getElementById('firstName').value = p?.firstName || '';
+        document.getElementById('middleName').value = p?.middleName || '';
+        document.getElementById('position').value = p?.position || 'JUNIOR';
+        document.getElementById('hourlyRate').value = p?.hourlyRate ?? '';
+        document.getElementById('employmentType').value = p?.employmentType || 'FULL_TIME';
+        document.getElementById('formError').textContent = '';
+    }
+
+    function closeForm() { document.getElementById('modal').classList.remove('active'); }
+
+    async function save() {
+        const errorEl = document.getElementById('formError');
+        errorEl.textContent = '';
+
+        const id = document.getElementById('programmerId').value;
+        const lastName = document.getElementById('lastName').value.trim();
+        const firstName = document.getElementById('firstName').value.trim();
+        const middleName = document.getElementById('middleName').value.trim();
+        const hourlyRate = parseFloat(document.getElementById('hourlyRate').value);
+
+        if (!lastName || !firstName) { errorEl.textContent = 'Укажите фамилию и имя'; return; }
+        if (isNaN(hourlyRate) || hourlyRate < 0) { errorEl.textContent = 'Некорректная ставка'; return; }
+
+        const body = {
+            lastName,
+            firstName,
+            middleName,
+            position: document.getElementById('position').value,
+            hourlyRate,
+            employmentType: document.getElementById('employmentType').value
+        };
+
+        try {
+            if (id) await API.put('/api/programmers/' + id, body);
+            else    await API.post('/api/programmers', body);
+            closeForm();
+            await load();
+        } catch (e) {
+            errorEl.textContent = e.message || 'Ошибка сохранения';
+        }
+    }
+
+    async function del(id) {
+        if (!confirm('Удалить программиста?')) return;
+        try {
+            await API.del('/api/programmers/' + id);
+            await load();
+        } catch (e) {
+            alert('Ошибка удаления: ' + (e.message || ''));
+        }
+    }
+
+    function logout() { API.clear(); window.location.href = '/login.html'; }
+
+    load();
+</script>
+</body>
+</html>

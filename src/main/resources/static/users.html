@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Пользователи</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ccc; padding: 6px; }
+        th { background: #f0f0f0; }
+        .toolbar { margin-bottom: 10px; display: flex; gap: 6px; }
+        .modal-backdrop {
+            position: fixed; inset: 0; background: rgba(0,0,0,.4);
+            display: none; align-items: center; justify-content: center;
+        }
+        .modal-backdrop.open { display: flex; }
+        .modal {
+            background: #fff; padding: 20px; border-radius: 6px;
+            min-width: 320px; box-shadow: 0 4px 20px rgba(0,0,0,.2);
+        }
+        .modal h3 { margin-top: 0; }
+        .modal label { display: block; margin: 8px 0 4px; font-size: 14px; }
+        .modal input, .modal select { width: 100%; padding: 6px; box-sizing: border-box; }
+        .modal-actions { margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end; }
+        .error { color: #b00; font-size: 13px; margin-top: 8px; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+<h2>Пользователи</h2>
+<div class="toolbar">
+    <button onclick="location.href='/projects.html'">Проекты</button>
+    <button onclick="location.href='/programmers.html'">Программисты</button>
+    <button onclick="openCreate()">➕ Добавить</button>
+    <button onclick="logout()">Выйти</button>
+</div>
+
+<table>
+    <thead>
+    <tr><th>Логин</th><th>Email</th><th>Роль</th><th>Действия</th></tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+</table>
+
+<div class="modal-backdrop" id="modal">
+    <div class="modal">
+        <h3 id="modalTitle">Новый пользователь</h3>
+        <form id="userForm" onsubmit="return save(event)">
+            <label>Логин</label>
+            <input id="f-username" required minlength="3" maxlength="50">
+
+            <label>Email</label>
+            <input id="f-email" type="email" required>
+
+            <label>Пароль <span id="pwdHint" style="color:#888;font-weight:normal"></span></label>
+            <input id="f-password" type="password" autocomplete="new-password">
+
+            <label>Роль</label>
+            <select id="f-role">
+                <option value="CUSTOMER">CUSTOMER</option>
+                <option value="MANAGER">MANAGER</option>
+                <option value="ADMINISTRATOR">ADMINISTRATOR</option>
+            </select>
+
+            <div class="error" id="formError"></div>
+
+            <div class="modal-actions">
+                <button type="button" onclick="closeModal()">Отмена</button>
+                <button type="submit">Сохранить</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="/js/api.js"></script>
+<script>
+    const user = API.getUser();
+    if (!user || user.role !== 'ADMINISTRATOR') { window.location.href = '/projects.html'; }
+
+    let editingId = null;
+
+    async function load() {
+        const list = await API.get('/api/users');
+        const tbody = document.getElementById('tbody');
+        tbody.innerHTML = '';
+        list.forEach(u => {
+            const tr = document.createElement('tr');
+
+            const tdLogin = document.createElement('td');
+            tdLogin.textContent = u.username;
+            const tdEmail = document.createElement('td');
+            tdEmail.textContent = u.email;
+            const tdRole = document.createElement('td');
+            tdRole.textContent = u.role;
+
+            const tdActions = document.createElement('td');
+            const editBtn = document.createElement('button');
+            editBtn.textContent = '✏️';
+            editBtn.onclick = () => openEdit(u);
+            const delBtn = document.createElement('button');
+            delBtn.textContent = '🗑️';
+            delBtn.onclick = () => del(u.userId);
+            tdActions.append(editBtn, delBtn);
+
+            tr.append(tdLogin, tdEmail, tdRole, tdActions);
+            tbody.appendChild(tr);
+        });
+    }
+
+    function openCreate() {
+        editingId = null;
+        document.getElementById('modalTitle').textContent = 'Новый пользователь';
+        document.getElementById('userForm').reset();
+        document.getElementById('f-password').required = true;
+        document.getElementById('pwdHint').textContent = '';
+        document.getElementById('formError').textContent = '';
+        document.getElementById('modal').classList.add('open');
+    }
+
+    function openEdit(u) {
+        editingId = u.userId;
+        document.getElementById('modalTitle').textContent = 'Редактировать пользователя';
+        document.getElementById('userForm').reset();
+        document.getElementById('f-username').value = u.username;
+        document.getElementById('f-email').value = u.email;
+        document.getElementById('f-role').value = u.role;
+        document.getElementById('f-password').required = false;
+        document.getElementById('pwdHint').textContent = '(оставьте пустым, чтобы не менять)';
+        document.getElementById('formError').textContent = '';
+        document.getElementById('modal').classList.add('open');
+    }
+
+    function closeModal() {
+        document.getElementById('modal').classList.remove('open');
+    }
+
+    async function save(event) {
+        event.preventDefault();
+        const errorEl = document.getElementById('formError');
+        errorEl.textContent = '';
+
+        const body = {
+            username: document.getElementById('f-username').value.trim(),
+            email:    document.getElementById('f-email').value.trim(),
+            role:     document.getElementById('f-role').value
+        };
+        const pwd = document.getElementById('f-password').value;
+        if (pwd) body.password = pwd;
+
+        try {
+            if (editingId) {
+                await API.put('/api/users/' + editingId, body);
+            } else {
+                if (!pwd) { errorEl.textContent = 'Пароль обязателен при создании'; return false; }
+                await API.post('/api/users', body);
+            }
+            closeModal();
+            await load();
+        } catch (e) {
+            errorEl.textContent = e.message || 'Ошибка сохранения';
+        }
+        return false;
+    }
+
+    async function del(id) {
+        if (!confirm('Удалить пользователя?')) return;
+        try {
+            await API.del('/api/users/' + id);
+            await load();
+        } catch (e) {
+            alert('Ошибка удаления: ' + (e.message || ''));
+        }
+    }
+
+    function logout() { API.clear(); window.location.href = '/login.html'; }
+
+    load();
+</script>
+</body>
+</html>
